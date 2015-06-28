@@ -1,10 +1,20 @@
-strava
+Strava
 ======
 
-suck data out of strava
+suck data out of strava using [stravalib](https://github.com:hozn/stravalib/)
+
+```shell
+if ! which pip; then sudo easy_install pip; fi
+sudo pip install units
+sudo pip install stravalib
+./stravasuck.py
 
 ```
-sudo easy_install pip
-pip install units
-git clone git@github.com:hozn/stravalib.git
+
+# the DJango version
+
+```
+sudo pip install Django
+./manage.py migrate
+./test.py
 ```
