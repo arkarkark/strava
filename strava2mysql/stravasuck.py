@@ -6,14 +6,26 @@ import subprocess
 import BaseHTTPServer
 import urlparse
 
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "strava2mysql.settings")
+
+
 import stravalib
+import strava.models
 
 
-logging.basicConfig()
-logging.getLogger().setLevel(logging.ERROR)
+def Strava2Mysql(client):
+  """Load data into a nysql database."""
+  athlete = client.get_athlete()
+  log.info("For Athlete %(id)s %(athlete)r", {"id": athlete.id, "athlete": dir(athlete)})
 
-log = logging.getLogger("stravasuck")  # pylint: disable=invalid-name
-log.setLevel(logging.DEBUG)
+  dbathlete = strava.models.Athlete()
+  for key in dir(athlete):
+    print "Checking %r" % key
+    if key in dbathlete.__dict__:
+      value = getattr(athlete, key)
+      print "Setting %r to %r" % (key, value)
+      setattr(dbathlete, key, value)
+  dbathlete.save()
 
 def MakeAllActivitiesPrivate(client):
   """Called after all the authentication is done"""
@@ -24,6 +36,9 @@ def MakeAllActivitiesPrivate(client):
     if not activity.private:
       log.info(activity)
       client.update_activity(activity.id, private=True)
+
+
+
 
 
 ALL_DONE_WITH_HTTPD = False
@@ -78,8 +93,14 @@ def StravaAuthenticate(callback):
 
 def Main():
   """Main."""
-  StravaAuthenticate(MakeAllActivitiesPrivate)
+  StravaAuthenticate(Strava2Mysql)
 
+
+logging.basicConfig()
+logging.getLogger().setLevel(logging.ERROR)
+
+log = logging.getLogger("stravasuck")  # pylint: disable=invalid-name
+log.setLevel(logging.DEBUG)
 
 if __name__ == '__main__':
   Main()

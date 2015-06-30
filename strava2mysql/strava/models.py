@@ -5,6 +5,8 @@ import inspect
 import sys
 
 import django
+import django.db
+import django.db.models
 import stravalib
 
 THISMODULE = sys.modules[__name__]
@@ -18,13 +20,13 @@ def MakeModel(name, model_class):
       key = "%s_id" % name
     if isinstance(value, stravalib.attributes.Attribute):
       type_to_django = {
-        unicode: django.db.models.CharField(max_length=200, default=""),
-        int: django.db.models.IntegerField(default=-1),
-        float: django.db.models.FloatField(default=-1.0),
-        bool: django.db.models.BooleanField(default=False),
-        datetime.datetime: django.db.models.DateTimeField(default=django.utils.timezone.now),
-        datetime.date: django.db.models.DateField(default=django.utils.timezone.now),
-        datetime.timedelta: django.db.models.DurationField(),
+        unicode: django.db.models.CharField(max_length=200, default="", null=True),
+        int: django.db.models.IntegerField(null=True),
+        float: django.db.models.FloatField(null=True),
+        bool: django.db.models.NullBooleanField(),
+        datetime.datetime: django.db.models.DateTimeField(default=django.utils.timezone.now, null=True),
+        datetime.date: django.db.models.DateField(default=django.utils.timezone.now, null=True),
+        datetime.timedelta: django.db.models.DurationField(null=True),
       }
 
       if value.type in type_to_django:
