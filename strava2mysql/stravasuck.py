@@ -1,31 +1,85 @@
 #!/usr/bin/python
 
+import datetime
 import logging
 import os
 import subprocess
 import BaseHTTPServer
 import urlparse
-
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "strava2mysql.settings")
 
+from django.utils import timezone
+timezone.now()
 
 import stravalib
 import strava.models
 
 
+def UpdateModel(src):
+  src_type = src.__class__.__name__
+  if not hasattr(strava.models, src_type):
+    log.error("Unknown model type: %r", src_type)
+    return
+  db_class = getattr(strava.models, src_type)
+  db_items = db_class.objects.filter(id=src.id)
+  if len(db_items) > 0:
+    log.info("Found existsing %s: %r", src_type, src.id)
+    db_obj = db_items[0]
+  else:
+    log.info("Making new %s: %r", src_type, src.id)
+    db_obj = db_class(id=src.id)
+  for key in dir(src):
+    if key in db_obj.__dict__:
+      value = getattr(src, key)
+      if type(value) == datetime.timedelta:
+        value = value.seconds
+      # log.debug("Setting %r to %r", key, value)
+      setattr(db_obj, key, value)
+    else:
+      id_key = "%s_id" % key
+      if id_key in db_obj.__dict__:
+        value = getattr(src, key)
+        if value is None or not hasattr(value, "id"):
+          continue
+        value = value.id
+        try:
+          # activity.map_id is something crazy like "a7467474" same with gear too.
+          value = int(value)
+          # log.debug("Setting ID %r to %r", key, value)
+          setattr(db_obj, id_key, value)
+        except:
+          pass
+  db_obj.save()
+  return
+  # now update any list items in here
+  for key in dir(src):
+    if not hasattr(src, key):
+      continue
+    value = getattr(src, key)
+    if type(value) == list:
+      log.info("Updating list: %r", key)
+      for item in value:
+        UpdateModel(item)
+
+def UpdateItems(items):
+  count = 0
+  for item in items:
+    UpdateModel(item)
+    count += 1
+    if count > 0:
+      break
+
 def Strava2Mysql(client):
   """Load data into a nysql database."""
   athlete = client.get_athlete()
-  log.info("For Athlete %(id)s %(athlete)r", {"id": athlete.id, "athlete": dir(athlete)})
+  log.info("For Athlete %s %s %s", athlete.id, athlete.firstname, athlete.lastname)
 
-  dbathlete = strava.models.Athlete()
-  for key in dir(athlete):
-    print "Checking %r" % key
-    if key in dbathlete.__dict__:
-      value = getattr(athlete, key)
-      print "Setting %r to %r" % (key, value)
-      setattr(dbathlete, key, value)
-  dbathlete.save()
+  # UpdateModel(athlete)
+
+  # UpdateItems(client.get_athlete_friends())
+  # UpdateItems(client.get_athlete_followers())
+  UpdateItems(client.get_activities())
+
 
 def MakeAllActivitiesPrivate(client):
   """Called after all the authentication is done"""
@@ -95,12 +149,12 @@ def Main():
   """Main."""
   StravaAuthenticate(Strava2Mysql)
 
-
 logging.basicConfig()
 logging.getLogger().setLevel(logging.ERROR)
 
 log = logging.getLogger("stravasuck")  # pylint: disable=invalid-name
 log.setLevel(logging.DEBUG)
+
 
 if __name__ == '__main__':
   Main()
