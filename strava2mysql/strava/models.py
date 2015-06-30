@@ -12,6 +12,18 @@ import django.db
 import django.db.models
 import stravalib
 
+# from south.modelsinspector import add_introspection_rules
+
+class BigAutoField(django.db.models.fields.AutoField):
+  """Auto incrementing big field."""
+  def db_type(self, connection):
+    if 'mysql' in connection.__class__.__module__:
+      return 'bigint AUTO_INCREMENT'
+    return super(BigAutoField, self).db_type(connection)
+
+# add_introspection_rules([], ["^MYAPP\.fields\.BigAutoField"])
+
+
 
 THISMODULE = sys.modules[__name__]
 
@@ -22,14 +34,20 @@ def MakeModel(name, model_class):
   "Turn a strava model class into a django model class."
   print "Making model: %s" % name
   model_deps[name] = []
-  props = {"__module__": __name__}
-  for key, value in model_class.__dict__.items():
+  props = {
+    "__module__": __name__,
+    "id": BigAutoField(primary_key=True),
+  }
+  for key in dir(model_class):
+    if not hasattr(model_class, key):
+      continue
+    value = getattr(model_class, key)
     if key == 'id':
       key = "%s_id" % name
     if isinstance(value, stravalib.attributes.Attribute):
       type_to_django = {
         unicode: django.db.models.CharField(max_length=200, default="", null=True),
-        int: django.db.models.IntegerField(null=True),
+        int: django.db.models.BigIntegerField(null=True),
         float: django.db.models.FloatField(null=True),
         bool: django.db.models.NullBooleanField(),
         datetime.datetime: django.db.models.DateTimeField(default=django.utils.timezone.now, null=True),
@@ -41,6 +59,7 @@ def MakeModel(name, model_class):
         props[key] = type_to_django[value.type]
       elif isinstance(value, stravalib.attributes.EntityCollection):
         if name == "BaseEffort" or key == "achievements":
+          print "Skipping", name, key
           continue # WTF
         model_deps[name].append(value.type.__name__)
       elif isinstance(value, stravalib.attributes.EntityAttribute):
@@ -52,6 +71,9 @@ def MakeModel(name, model_class):
       else:
         # print "UNKNOWN ATTRIBUTE TYPE: %s: %r" %(key, value.type)
         pass
+    else:
+      # print "Unknown type:", name, key, value
+      pass
   model_props[name] = props
 
 def MakeModelsFromModule(mod):
@@ -61,20 +83,19 @@ def MakeModelsFromModule(mod):
       MakeModel(name, value)
   # clean out deps
   for name, deps in model_deps.items():
-    print "Before", name, deps
+    # print "Before", name, deps
     model_deps[name] = [x for x in deps if x in model_props]
-    print "After", name, model_deps[name]
-
+    # print "After", name, model_deps[name]
 
   while len(model_props) > 0:
-    print ""
-    print "len(model_props)", len(model_props)
     clean_deps = {}
     for k, v in model_deps.items():
       if len(v) > 0:
         clean_deps[k] = v
-    print clean_deps
-    print model_props.keys()
+    #  print ""
+    #  print "len(model_props)", len(model_props)
+    #  print clean_deps
+    #  print model_props.keys()
 
     old_model_props = model_props.copy()
     for name, props in old_model_props.items():

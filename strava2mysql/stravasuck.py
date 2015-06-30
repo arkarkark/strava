@@ -14,6 +14,15 @@ timezone.now()
 import stravalib
 import strava.models
 
+def Exists(src):
+  src_type = src.__class__.__name__
+  return ExistsByTypeAndId(src_type, src.id)
+
+def ExistsByTypeAndId(src_type, id):
+  db_class = getattr(strava.models, src_type)
+  db_items = db_class.objects.filter(id=id)
+  return len(db_items) > 0
+
 
 def UpdateModel(src):
   src_type = src.__class__.__name__
@@ -49,11 +58,12 @@ def UpdateModel(src):
           setattr(db_obj, id_key, value)
         except:
           pass
+  print "Saving", src_type, db_obj.id
   db_obj.save()
-  return
   # now update any list items in here
   for key in dir(src):
     if not hasattr(src, key):
+      # log.info("Ignoring not hasattr %r", key)
       continue
     value = getattr(src, key)
     if type(value) == list:
@@ -66,20 +76,30 @@ def UpdateItems(items):
   for item in items:
     UpdateModel(item)
     count += 1
-    if count > 0:
+    if False and count > 0:
       break
+
+def dump(obj):
+  for key in dir(obj):
+    print "dump", key, getattr(obj, key)
 
 def Strava2Mysql(client):
   """Load data into a nysql database."""
   athlete = client.get_athlete()
   log.info("For Athlete %s %s %s", athlete.id, athlete.firstname, athlete.lastname)
 
-  # UpdateModel(athlete)
+  UpdateModel(athlete)
 
-  # UpdateItems(client.get_athlete_friends())
-  # UpdateItems(client.get_athlete_followers())
-  UpdateItems(client.get_activities())
-
+  UpdateItems(client.get_athlete_friends())
+  UpdateItems(client.get_athlete_followers())
+  for activity in client.get_activities():
+    if not Exists(activity):
+      activity = client.get_activity(activity.id)
+      UpdateModel(activity)
+      for segment_effort in activity.segment_efforts:
+        if not ExistsByTypeAndId("Segment", segment_effort.segment.id):
+          segment = client.get_segment(segment_effort.segment.id)
+          UpdateModel(segment)
 
 def MakeAllActivitiesPrivate(client):
   """Called after all the authentication is done"""
@@ -90,7 +110,6 @@ def MakeAllActivitiesPrivate(client):
     if not activity.private:
       log.info(activity)
       client.update_activity(activity.id, private=True)
-
 
 
 
