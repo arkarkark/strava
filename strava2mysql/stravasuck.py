@@ -8,11 +8,17 @@ import BaseHTTPServer
 import urlparse
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "strava2mysql.settings")
 
+from tqdm import tqdm
+
 from django.utils import timezone
+from django.db.transaction import atomic
 timezone.now()
 
 import stravalib
 import strava.models
+
+import django
+django.setup()
 
 def Exists(src):
   src_type = src.__class__.__name__
@@ -23,19 +29,21 @@ def ExistsByTypeAndId(src_type, id):
   db_items = db_class.objects.filter(id=id)
   return len(db_items) > 0
 
+IGNORED_MODEL_TYPES = ["SegmentEfforAchievement"]
 
 def UpdateModel(src):
   src_type = src.__class__.__name__
   if not hasattr(strava.models, src_type):
-    log.error("Unknown model type: %r", src_type)
+    if src_type not in IGNORED_MODEL_TYPES:
+      log.error("Unknown model type: %r", src_type)
     return
   db_class = getattr(strava.models, src_type)
   db_items = db_class.objects.filter(id=src.id)
   if len(db_items) > 0:
-    log.info("Found existsing %s: %r", src_type, src.id)
+    log.debug("Found existsing %s: %r", src_type, src.id)
     db_obj = db_items[0]
   else:
-    log.info("Making new %s: %r", src_type, src.id)
+    log.debug("Making new %s: %r", src_type, src.id)
     db_obj = db_class(id=src.id)
   for key in dir(src):
     if key in db_obj.__dict__:
@@ -58,7 +66,7 @@ def UpdateModel(src):
           setattr(db_obj, id_key, value)
         except:
           pass
-  print "Saving", src_type, db_obj.id
+  log.debug("Saving %s %d", src_type, db_obj.id)
   db_obj.save()
   # now update any list items in here
   for key in dir(src):
@@ -67,13 +75,13 @@ def UpdateModel(src):
       continue
     value = getattr(src, key)
     if type(value) == list:
-      log.info("Updating list: %r", key)
+      log.debug("Updating list: %r", key)
       for item in value:
         UpdateModel(item)
 
 def UpdateItems(items):
   count = 0
-  for item in items:
+  for item in tqdm(items):
     UpdateModel(item)
     count += 1
     if False and count > 0:
@@ -83,23 +91,71 @@ def dump(obj):
   for key in dir(obj):
     print "dump", key, getattr(obj, key)
 
+def LoadStream(client, activity_id):
+  stream_types = ['time', 'latlng', 'altitude']
+  streams = client.get_activity_streams(activity_id, stream_types, resolution='medium')
+
+  db_items = strava.models.ActivityStream.objects.filter(activity_id=activity_id)
+  if len(db_items) > 0:
+    log.info("ActivityStream for activity_id %d already exists", activity_id)
+    # return # TODO(ark): unless --force
+    activity_stream_obj = db_items[0]
+  else:
+    activity_stream_obj = strava.models.ActivityStream(activity_id=activity_id)
+    activity_stream_obj.save()
+
+  UpdateActivityStreamData(activity_stream_obj.id, streams, stream_types)
+
+@atomic
+def UpdateActivityStreamData(activity_stream_id, streams, stream_types):
+
+  strava.models.ActivityStreamDataPoint.objects.filter(activity_stream_id=activity_stream_id).delete()
+
+  data_length = None
+  for stream_type in stream_types:
+    if stream_type in streams:
+      if data_length is None:
+        data_length = len(streams[stream_type].data)
+      else:
+        assert(data_length == len(streams[stream_type].data))
+
+  log.info("Loading ActivityStream (%d data points)", data_length)
+
+  for index in tqdm(range(0, data_length)):
+    activity_stream_data_point_obj = strava.models.ActivityStreamDataPoint(
+      activity_stream_id=activity_stream_id
+    )
+    if 'time' in streams:
+      activity_stream_data_point_obj.seconds = streams['time'].data[index]
+    if 'latlng' in streams:
+      activity_stream_data_point_obj.latitude = streams['latlng'].data[index][0]
+      activity_stream_data_point_obj.longitude = streams['latlng'].data[index][1]
+    if 'altitude' in streams:
+      activity_stream_data_point_obj.altitude = streams['altitude'].data[index]
+    activity_stream_data_point_obj.save()
+
 def Strava2Mysql(client):
   """Load data into a nysql database."""
   athlete = client.get_athlete()
   log.info("For Athlete %s %s %s", athlete.id, athlete.firstname, athlete.lastname)
 
-  UpdateModel(athlete)
+  # UpdateModel(athlete)
 
-  UpdateItems(client.get_athlete_friends())
-  UpdateItems(client.get_athlete_followers())
+  # UpdateItems(client.get_athlete_friends())
+  # UpdateItems(client.get_athlete_followers())
+
   for activity in client.get_activities():
+    log.info("Looking at activity: %r", activity.id)
+
     if not Exists(activity):
       activity = client.get_activity(activity.id)
       UpdateModel(activity)
-      for segment_effort in activity.segment_efforts:
+      log.info("Loading Segments")
+      for segment_effort in tqdm(activity.segment_efforts):
         if not ExistsByTypeAndId("Segment", segment_effort.segment.id):
           segment = client.get_segment(segment_effort.segment.id)
           UpdateModel(segment)
+      LoadStream(client, activity.id)
 
 def MakeAllActivitiesPrivate(client):
   """Called after all the authentication is done"""
@@ -110,9 +166,6 @@ def MakeAllActivitiesPrivate(client):
     if not activity.private:
       log.info(activity)
       client.update_activity(activity.id, private=True)
-
-
-
 
 ALL_DONE_WITH_HTTPD = False
 
@@ -173,6 +226,7 @@ logging.getLogger().setLevel(logging.ERROR)
 
 log = logging.getLogger("stravasuck")  # pylint: disable=invalid-name
 log.setLevel(logging.DEBUG)
+log.setLevel(logging.INFO)
 
 
 if __name__ == '__main__':

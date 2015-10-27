@@ -112,3 +112,13 @@ def MakeModelsFromModule(mod):
         del model_props[name]
 
 MakeModelsFromModule(stravalib.model)
+
+class ActivityStream(django.db.models.Model):
+  activity = django.db.models.ForeignKey(Activity)
+
+class ActivityStreamDataPoint(django.db.models.Model):
+  activity_stream = django.db.models.ForeignKey(ActivityStream, null=True)
+  seconds = django.db.models.IntegerField(null=True)
+  latitude = django.db.models.FloatField(null=True)
+  longitude = django.db.models.FloatField(null=True)
+  altitude = django.db.models.FloatField(null=True)
