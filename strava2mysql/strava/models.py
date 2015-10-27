@@ -118,7 +118,10 @@ class ActivityStream(django.db.models.Model):
 
 class ActivityStreamDataPoint(django.db.models.Model):
   activity_stream = django.db.models.ForeignKey(ActivityStream, null=True)
-  seconds = django.db.models.IntegerField(null=True)
+  time = django.db.models.IntegerField(null=True)
   latitude = django.db.models.FloatField(null=True)
   longitude = django.db.models.FloatField(null=True)
   altitude = django.db.models.FloatField(null=True)
+  distance = django.db.models.FloatField(null=True)
+  velocity_smooth = django.db.models.FloatField(null=True)
+  grade_smooth = django.db.models.FloatField(null=True)

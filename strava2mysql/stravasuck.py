@@ -92,7 +92,7 @@ def dump(obj):
     print "dump", key, getattr(obj, key)
 
 def LoadStream(client, activity_id):
-  stream_types = ['time', 'latlng', 'altitude']
+  stream_types = ['time', 'latlng', 'altitude', 'distance', 'velocity_smooth', 'grade_smooth']
   streams = client.get_activity_streams(activity_id, stream_types, resolution='medium')
 
   db_items = strava.models.ActivityStream.objects.filter(activity_id=activity_id)
@@ -125,13 +125,20 @@ def UpdateActivityStreamData(activity_stream_id, streams, stream_types):
     activity_stream_data_point_obj = strava.models.ActivityStreamDataPoint(
       activity_stream_id=activity_stream_id
     )
-    if 'time' in streams:
-      activity_stream_data_point_obj.seconds = streams['time'].data[index]
-    if 'latlng' in streams:
-      activity_stream_data_point_obj.latitude = streams['latlng'].data[index][0]
-      activity_stream_data_point_obj.longitude = streams['latlng'].data[index][1]
-    if 'altitude' in streams:
-      activity_stream_data_point_obj.altitude = streams['altitude'].data[index]
+
+    noattr = set()
+    for key, stream in streams.items():
+      if key == 'latlng':
+        activity_stream_data_point_obj.latitude = streams['latlng'].data[index][0]
+        activity_stream_data_point_obj.longitude = streams['latlng'].data[index][1]
+      else:
+        if hasattr(activity_stream_data_point_obj, key):
+          setattr(activity_stream_data_point_obj, key, streams[key].data[index])
+        else:
+          noattr.add(key)
+    if noattr:
+      log.info("Unknown keys from activity_stream_data_point: %r", noattr)
+      return
     activity_stream_data_point_obj.save()
 
 def Strava2Mysql(client):
@@ -139,13 +146,14 @@ def Strava2Mysql(client):
   athlete = client.get_athlete()
   log.info("For Athlete %s %s %s", athlete.id, athlete.firstname, athlete.lastname)
 
-  # UpdateModel(athlete)
+  UpdateModel(athlete)
 
-  # UpdateItems(client.get_athlete_friends())
-  # UpdateItems(client.get_athlete_followers())
+  UpdateItems(client.get_athlete_friends())
+  UpdateItems(client.get_athlete_followers())
 
+  count = 0
   for activity in client.get_activities():
-    log.info("Looking at activity: %r", activity.id)
+    log.info("Looking at activity: %r %s", activity.id, activity.name)
 
     if not Exists(activity):
       activity = client.get_activity(activity.id)
